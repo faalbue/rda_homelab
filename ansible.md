@@ -225,3 +225,201 @@ ansible-playbook playbooks/site.yml                            # run test playbo
 After bootstrap, harden the server:
 - Disable root SSH password auth (`PermitRootLogin prohibit-password` in `sshd_config`)
 - Or create a dedicated non-root user with `sudo`/`become` and disable root SSH entirely
+
+---
+
+## 11. SSH Hardening Playbook — `playbooks/harden_ssh.yml`
+
+Creates a local `administrator` OS user with full sudo, copies your SSH key to it,
+then disables root SSH login and password auth.
+
+**Run this after bootstrap** (while you still have root SSH access).
+
+```yaml
+---
+- name: Harden SSH — create administrator user and disable root login
+  hosts: proxmox
+  gather_facts: true
+  become: true
+  vars:
+    admin_user: administrator
+    ssh_public_key: "{{ lookup('file', '~/.ssh/ansible_proxmox.pub') }}"
+
+  tasks:
+    - name: Create administrator user
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        shell: /bin/bash
+        groups: sudo
+        append: true
+        state: present
+      when: ansible_user == 'root'
+
+    - name: Add SSH public key for administrator
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        key: "{{ ssh_public_key }}"
+        state: present
+      when: ansible_user == 'root'
+
+    - name: Install sudo
+      ansible.builtin.apt:
+        name: sudo
+        state: present
+        update_cache: false
+      when: ansible_user == 'root'
+
+    - name: Grant passwordless sudo
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/administrator
+        content: "administrator ALL=(ALL) NOPASSWD:ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+      when: ansible_user == 'root'
+
+    - name: Disable root SSH login
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+
+    - name: Disable password authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+
+    - name: Enable public key authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+        state: present
+
+    - name: Restart SSH
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+```
+
+Run it:
+
+```bash
+ansible-playbook playbooks/harden_ssh.yml
+```
+
+**After running**, update `inventory/hosts.yml` to use `administrator` instead of `root`
+and enable `become` so Ansible can still run privileged tasks:
+
+```yaml
+all:
+  children:
+    proxmox:
+      hosts:
+        pve01:
+          ansible_host: 192.168.1.x
+          ansible_user: administrator        # changed from root
+          ansible_python_interpreter: /usr/bin/python3
+```
+
+And update `ansible.cfg` to enable become by default:
+
+```ini
+[privilege_escalation]
+become = True
+become_method = sudo
+become_user = root
+```
+
+---
+
+## 12. Proxmox Firewall Playbook — `playbooks/configure_firewall.yml`
+
+Configures the Proxmox built-in firewall at both datacenter and node levels.
+**Safety order**: rules are written with the firewall disabled, then enabled — prevents lockout.
+
+Default policy: deny all inbound, allow all outbound. Whitelisted inbound:
+
+| Port / Protocol | Purpose |
+|---|---|
+| TCP 22 | SSH |
+| TCP 8006 | Proxmox Web UI |
+| TCP/UDP 111 | NFS portmapper (remove if not using NFS) |
+| TCP 2049 | NFS (remove if not using NFS) |
+
+Set `management_cidr` in `inventory/group_vars/proxmox/vars.yml` to restrict SSH and Web UI access to your management network only.
+
+```yaml
+---
+- name: Configure Proxmox Firewall — datacenter and node levels
+  hosts: proxmox
+  gather_facts: true
+  become: true
+
+  vars:
+    management_cidr: "10.0.0.0/24"
+
+  tasks:
+    # pmxcfs (Proxmox cluster filesystem) rejects chmod and atomic rename,
+    # so copy/lineinfile/template all fail. Use shell with direct redirection instead.
+
+    - name: Write datacenter firewall config (firewall disabled until rules are in place)
+      ansible.builtin.shell:
+        cmd: |
+          cat > /etc/pve/firewall/cluster.fw << 'FWEOF'
+          [OPTIONS]
+          enable: 0
+          policy_in: DROP
+          policy_out: ACCEPT
+
+          [RULES]
+          IN SSH(ACCEPT) -source {{ management_cidr }} -log nolog
+          IN ACCEPT -p tcp -dport 8006 -source {{ management_cidr }} -log nolog
+          IN ACCEPT -p tcp -dport 111 -log nolog
+          IN ACCEPT -p udp -dport 111 -log nolog
+          IN ACCEPT -p tcp -dport 2049 -log nolog
+          FWEOF
+      changed_when: true
+
+    - name: Write node-level firewall config (disabled — inherits datacenter rules)
+      ansible.builtin.shell:
+        cmd: |
+          cat > /etc/pve/nodes/{{ ansible_hostname }}/host.fw << 'FWEOF'
+          [OPTIONS]
+          enable: 0
+          FWEOF
+      changed_when: true
+
+    - name: Enable datacenter firewall
+      ansible.builtin.shell:
+        cmd: >-
+          python3 -c "p='/etc/pve/firewall/cluster.fw';
+          open(p,'w').write(open(p).read().replace('enable: 0','enable: 1',1))"
+      changed_when: true
+
+    - name: Enable node firewall
+      ansible.builtin.shell:
+        cmd: >-
+          python3 -c "p='/etc/pve/nodes/{{ ansible_hostname }}/host.fw';
+          open(p,'w').write(open(p).read().replace('enable: 0','enable: 1',1))"
+      changed_when: true
+```
+
+Run it:
+
+```bash
+ansible-playbook playbooks/configure_firewall.yml
+```
+
+Verify the firewall is active on the Proxmox host:
+
+```bash
+pve-firewall status
+```
+
+**After running**, confirm you can still reach the Web UI on port 8006 and SSH in before closing your existing session.
+
