@@ -1,2 +1,6 @@
 proxmox_api_token_id: "{{ vault_proxmox_api_token_id }}"
 proxmox_api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+acme_email: "raalbue@gmail.com"
+acme_dns_plugin_name: "ionos"
+acme_dns_api: "ionos"
+acme_dns_credentials: "{{ vault_acme_dns_credentials }}"
