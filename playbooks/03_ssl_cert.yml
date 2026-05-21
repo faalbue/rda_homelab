@@ -1,0 +1,64 @@
+---
+- name: Configure trusted SSL certificate via ACME
+  hosts: proxmox
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Ensure pexpect is installed
+      ansible.builtin.apt:
+        name: python3-pexpect
+        state: present
+
+    - name: Register ACME account
+      ansible.builtin.expect:
+        command: >-
+          pvenode acme account register default {{ acme_email }}
+          --directory https://acme-v02.api.letsencrypt.org/directory
+        responses:
+          '(?i)agree': 'y'
+        timeout: 30
+      register: acme_account
+      changed_when: acme_account.rc == 0
+      failed_when: acme_account.rc != 0 and 'already exists' not in acme_account.stdout
+
+    - name: Write DNS credentials to temp file
+      ansible.builtin.copy:
+        content: "{{ acme_dns_credentials }}"
+        dest: /tmp/acme_dns_creds
+        mode: "0600"
+      no_log: true
+
+    - name: Add IONOS DNS plugin
+      ansible.builtin.command:
+        argv:
+          - pvenode
+          - acme
+          - plugin
+          - add
+          - dns
+          - "{{ acme_dns_plugin_name }}"
+          - --api
+          - "{{ acme_dns_api }}"
+          - --data
+          - /tmp/acme_dns_creds
+      register: plugin_result
+      changed_when: plugin_result.rc == 0
+      failed_when: plugin_result.rc != 0 and 'already exists' not in plugin_result.stderr
+
+    - name: Remove DNS credentials temp file
+      ansible.builtin.file:
+        path: /tmp/acme_dns_creds
+        state: absent
+
+    - name: Configure ACME domain on node
+      ansible.builtin.command:
+        cmd: >-
+          pvenode config set
+          --acmedomain0 "domain={{ acme_domain }},plugin={{ acme_dns_plugin_name }}"
+      changed_when: true
+
+    - name: Order SSL certificate
+      ansible.builtin.command:
+        cmd: pvenode acme cert order --force
+      changed_when: true

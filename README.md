@@ -1,5 +1,11 @@
 # Homelab
 
+## Domain
+
+My Domain is [robaalbue.com](http://robaalbue.com)
+
+which is registered through 1and1.com
+
 ## Git
 
 This repository uses Git for version control of all homelab configuration, infrastructure code, and automation scripts.
@@ -25,11 +31,13 @@ Ansible is used for configuration management and automation. Playbooks handle pr
 
 ## Recipe Buildout
 
-ssh-keygen -t ed25519 -f ~/.ssh/ansible_proxmox -C "ansible@proxmox"
+ssh-keygen -t ed25519 -f ~/.ssh/ansible_proxmox -C "ansible@proxmox" (First time only)
 
 ### Copy to proxmox host
 
-ssh-copy-id -i ~/.ssh/ansible_proxmox.pub root@
+ssh-keygen -f "/root/.ssh/known_hosts" -R "10.0.0.175" (on re-install only) (clears key from known host file)
+
+ssh-copy-id -i ~/.ssh/ansible_proxmox.pub root@10.0.0.175
 
 ## Bootstrap Playbook
 
@@ -38,9 +46,27 @@ ssh-copy-id -i ~/.ssh/ansible_proxmox.pub root@
 I ran the Bootstrap Playbook from the ansible.md directory.  
 ansible-playbook playbooks/00_bootstrap.yml
 
+```markdown
+ansible-vault create inventory/group_vars/proxmox/vault.yml (First time use only)
+ansible-vault edit inventory/group_vars/proxmox/vault.yml (Second time and on)
+
+Validate that the ansible user is root
+through inventory/hosts.yml
+all:
+  children:
+    proxmox:
+      hosts:
+        pve01:
+          ansible_host: 192.168.1.x
+          ansible_user: root     <---------------
+          ansible_python_interpreter: /usr/bin/python3
+```
+
 ansible-playbook playbooks/site.yml
 
 ## 01_Harden_proxmox.yml
+
+ansible-playbook playbooks/01_harden_proxmox.yml
 
 **After running**, update `inventory/hosts.yml` to use `administrator` instead of `root`  
 and enable `become` so Ansible can still run privileged tasks:
@@ -73,5 +99,9 @@ Host pve01
       User administrator
       IdentityFile ~/.ssh/ansible_proxmox
 
+Test:
+ssh pve-hagrid
+
+Test:
 ansible-playbook playbooks/site.yml
 ```

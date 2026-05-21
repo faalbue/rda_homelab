@@ -423,3 +423,117 @@ pve-firewall status
 
 **After running**, confirm you can still reach the Web UI on port 8006 and SSH in before closing your existing session.
 
+---
+
+## 13. Trusted SSL Certificate via ACME/Let's Encrypt — `playbooks/03_ssl_cert.yml`
+
+Uses Proxmox's built-in `pvenode` ACME support with a DNS challenge via IONOS (1and1).
+No port 80 required — works on private homelabs.
+
+### Prerequisites
+
+1. Generate an IONOS API key at `developer.hosting.ionos.com` — you'll get a **prefix** and a **secret**
+2. Add a DNS A record in the IONOS control panel: `pve-hagrid.robaalbue.com → 10.0.0.175`
+
+### Variables
+
+Add to `inventory/hosts.yml` (per-host):
+
+```yaml
+pve01:
+  ansible_host: 10.0.0.175
+  ansible_user: administrator
+  ansible_python_interpreter: /usr/bin/python3
+  proxmox_hostname: "pve-hagrid"
+  acme_domain: "pve-hagrid.robaalbue.com"
+```
+
+Add to `inventory/group_vars/proxmox/vars.yml`:
+
+```yaml
+acme_email: "you@email.com"
+acme_dns_plugin_name: "ionos"
+acme_dns_api: "ionos"
+acme_dns_credentials: "{{ vault_acme_dns_credentials }}"
+```
+
+Add to `inventory/group_vars/proxmox/vault.yml` (encrypted):
+
+```yaml
+vault_acme_dns_credentials: |
+  IONOS_PREFIX=your-prefix
+  IONOS_SECRET=your-secret
+```
+
+### Playbook
+
+```yaml
+---
+- name: Configure trusted SSL certificate via ACME
+  hosts: proxmox
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Ensure pexpect is installed
+      ansible.builtin.apt:
+        name: python3-pexpect
+        state: present
+
+    - name: Register ACME account
+      ansible.builtin.expect:
+        command: >-
+          pvenode acme account register default {{ acme_email }}
+          --directory https://acme-v02.api.letsencrypt.org/directory
+        responses:
+          '(?i)agree': 'y'
+        timeout: 30
+      register: acme_account
+      changed_when: acme_account.rc == 0
+      failed_when: acme_account.rc != 0 and 'already exists' not in acme_account.stdout
+
+    - name: Write DNS credentials to temp file
+      ansible.builtin.copy:
+        content: "{{ acme_dns_credentials }}"
+        dest: /tmp/acme_dns_creds
+        mode: "0600"
+      no_log: true    
+    
+    - name: Add IONOS DNS plugin
+      ansible.builtin.command:
+        argv:
+          - pvenode
+          - acme
+          - plugin
+          - add
+          - dns
+          - "{{ acme_dns_api }}"
+          - --api
+          -"{{ acme_dns_api }}"
+          - --data
+          - "{{ acme_dns_credentials }}"
+      register: plugin_result
+      changed_when: plugin_result.rc == 0
+      failed_when: plugin_result.rc != 0 and 'already exists' not in plugin_result.stderr
+
+    - name: Configure ACME domain on node
+      ansible.builtin.command:
+        cmd: >-
+          pvenode config set
+          --acmedomain0 "domain={{ acme_domain }},plugin={{ acme_dns_plugin_name }}"
+      changed_when: true
+
+    - name: Order SSL certificate
+      ansible.builtin.command:
+        cmd: pvenode acme cert order
+      changed_when: true
+```
+
+Run it:
+
+```bash
+ansible-playbook playbooks/03_ssl_cert.yml
+```
+
+After the cert is issued Proxmox auto-renews it. Verify in the Web UI under **Node → Certificates**.
+

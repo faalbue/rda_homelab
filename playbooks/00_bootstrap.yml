@@ -39,3 +39,23 @@
       ansible.builtin.debug:
         msg: "{{ token_result.stdout }}"
       when: token_result.changed
+
+    # Hostname configuration
+    - name: Set system hostname
+      ansible.builtin.hostname:
+        name: "{{ proxmox_hostname }}"
+
+    - name: Update /etc/hostname
+      ansible.builtin.copy:
+        dest: /etc/hostname
+        content: "{{ proxmox_hostname }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Update /etc/hosts with new hostname
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^{{ ansible_host }}\s+'
+        line: "{{ ansible_host }} {{ proxmox_hostname }}.local {{ proxmox_hostname }}"
+        state: present
