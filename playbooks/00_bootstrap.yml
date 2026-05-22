@@ -10,6 +10,15 @@
     ansible_user: root
     ansible_password: "{{ root_password }}"
     ansible_ssh_common_args: '-o PreferredAuthentications=password'
+
+    # ---- Configurable: APT sources suite ----
+    # Default to bookworm; set to "trixie" for full PVE 9/Debian 13 repos
+    pve_debian_suite: "bookworm"
+
+    # Signing key paths
+    pve_debian_keyring: "/usr/share/keyrings/debian-archive-keyring.gpg"
+    pve_proxmox_keyring: "/usr/share/keyrings/proxmox-archive-keyring.gpg"
+
   tasks:
     - name: Copy SSH public key for ansible user
       ansible.posix.authorized_key:
@@ -40,11 +49,7 @@
         msg: "{{ token_result.stdout }}"
       when: token_result.changed
 
-<<<<<<< HEAD
     # Hostname configuration
-=======
-      # Hostname configuration
->>>>>>> 2031198e734698507c5b224b68c65cb1dadda611
     - name: Set system hostname
       ansible.builtin.hostname:
         name: "{{ proxmox_hostname }}"
@@ -62,8 +67,288 @@
         path: /etc/hosts
         regexp: '^{{ ansible_host }}\s+'
         line: "{{ ansible_host }} {{ proxmox_hostname }}.local {{ proxmox_hostname }}"
-<<<<<<< HEAD
         state: present
-=======
-        state: present                                                                                                                                                                             
->>>>>>> 2031198e734698507c5b224b68c65cb1dadda611
+
+    # ================================================================
+    # 0. Gather and validate PVE version
+    # ================================================================
+    - name: Get Proxmox VE version
+      ansible.builtin.shell: |
+        pveversion | awk -F'/' '{print $2}' | awk -F'-' '{print $1}'
+      register: pve_version_raw
+      changed_when: false
+
+    - name: Parse PVE major and minor version
+      ansible.builtin.set_fact:
+        pve_version: "{{ pve_version_raw.stdout | trim }}"
+        pve_major: "{{ (pve_version_raw.stdout | trim).split('.')[0] }}"
+        pve_minor: "{{ (pve_version_raw.stdout | trim).split('.')[1] | default('0') }}"
+
+    - name: Display detected PVE version
+      ansible.builtin.debug:
+        msg: "Detected Proxmox VE {{ pve_version }} (major={{ pve_major }}, minor={{ pve_minor }})"
+
+    - name: Fail if not PVE 9.x
+      ansible.builtin.fail:
+        msg: >-
+          This playbook only supports Proxmox VE 9.0-9.2.x.
+          Detected: {{ pve_version }}
+      when: pve_major | int != 9 or pve_minor | int > 2
+
+    # ================================================================
+    # 1. Disable legacy APT sources
+    # ================================================================
+    - name: Check for legacy sources.list with active entries
+      ansible.builtin.shell: |
+        grep -qE '^\s*deb ' /etc/apt/sources.list 2>/dev/null && echo "found" || echo "none"
+      register: legacy_sources_list
+      changed_when: false
+
+    - name: Backup and disable entries in sources.list
+      ansible.builtin.shell: |
+        cp /etc/apt/sources.list /etc/apt/sources.list.bak
+        sed -i '/^\s*deb /s/^/# Disabled by Ansible PVE Post-Install /' /etc/apt/sources.list
+      when: legacy_sources_list.stdout == "found"
+
+    - name: Find legacy .list files in sources.list.d
+      ansible.builtin.shell: |
+        find /etc/apt/sources.list.d/ -maxdepth 1 -type f -name "*.list" 2>/dev/null || true
+      register: legacy_list_files
+      changed_when: false
+
+    - name: Rename legacy .list files to .list.bak
+      ansible.builtin.shell: |
+        mv "{{ item }}" "{{ item }}.bak"
+      loop: "{{ legacy_list_files.stdout_lines }}"
+      when: legacy_list_files.stdout_lines | length > 0
+
+    # ================================================================
+    # 2. Correct Proxmox VE APT sources (deb822 format)
+    # ================================================================
+    - name: Write debian.sources (deb822 format)
+      ansible.builtin.shell: |
+        cat > /etc/apt/sources.list.d/debian.sources << 'SOURCES_EOF'
+        Types: deb
+        URIs: http://deb.debian.org/debian
+        Suites: {{ pve_debian_suite }}
+        Components: main contrib
+        Signed-By: {{ pve_debian_keyring }}
+
+        Types: deb
+        URIs: http://security.debian.org/debian-security
+        Suites: {{ pve_debian_suite }}-security
+        Components: main contrib
+        Signed-By: {{ pve_debian_keyring }}
+
+        Types: deb
+        URIs: http://deb.debian.org/debian
+        Suites: {{ pve_debian_suite }}-updates
+        Components: main contrib
+        Signed-By: {{ pve_debian_keyring }}
+        SOURCES_EOF
+        sed -i 's/^        //' /etc/apt/sources.list.d/debian.sources
+
+    # ================================================================
+    # 3. Disable pve-enterprise repository
+    # ================================================================
+    - name: Find .sources files containing pve-enterprise
+      ansible.builtin.shell: |
+        grep -rl "Components:.*pve-enterprise" /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+      register: pve_enterprise_files
+      changed_when: false
+
+    - name: Disable pve-enterprise in .sources files
+      ansible.builtin.shell: |
+        if grep -q "^Enabled:" "{{ item }}"; then
+          sed -i 's/^Enabled:.*/Enabled: false/' "{{ item }}"
+        else
+          echo "Enabled: false" >> "{{ item }}"
+        fi
+      loop: "{{ pve_enterprise_files.stdout_lines }}"
+      when: pve_enterprise_files.stdout_lines | length > 0
+
+    # ================================================================
+    # 4. Enable pve-no-subscription repository
+    # ================================================================
+    - name: Check if pve-no-subscription already exists
+      ansible.builtin.shell: |
+        grep -rl "pve-no-subscription" /etc/apt/sources.list.d/ 2>/dev/null | head -1 || true
+      register: pve_nosub_existing
+      changed_when: false
+
+    - name: Write pve-no-subscription repo (deb822 format)
+      ansible.builtin.shell: |
+        cat > /etc/apt/sources.list.d/proxmox.sources << 'SOURCES_EOF'
+        Types: deb
+        URIs: http://download.proxmox.com/debian/pve
+        Suites: {{ pve_debian_suite }}
+        Components: pve-no-subscription
+        Signed-By: {{ pve_proxmox_keyring }}
+        SOURCES_EOF
+        sed -i 's/^        //' /etc/apt/sources.list.d/proxmox.sources
+      when: pve_nosub_existing.stdout == ""
+
+    # ================================================================
+    # 5. Disable Ceph enterprise repository
+    # ================================================================
+    - name: Find .sources files containing ceph enterprise
+      ansible.builtin.shell: |
+        grep -rl "enterprise.proxmox.com.*ceph" /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+      register: ceph_enterprise_files
+      changed_when: false
+
+    - name: Disable ceph enterprise in .sources files
+      ansible.builtin.shell: |
+        if grep -q "^Enabled:" "{{ item }}"; then
+          sed -i 's/^Enabled:.*/Enabled: false/' "{{ item }}"
+        else
+          echo "Enabled: false" >> "{{ item }}"
+        fi
+      loop: "{{ ceph_enterprise_files.stdout_lines }}"
+      when: ceph_enterprise_files.stdout_lines | length > 0
+
+    # ================================================================
+    # 6. Add Ceph no-subscription repository
+    # ================================================================
+    - name: Determine Ceph release name
+      ansible.builtin.set_fact:
+        ceph_release: "{{ 'ceph-tentacle' if (pve_minor | int >= 2) else 'ceph-squid' }}"
+
+    - name: Check if ceph no-subscription repo already exists
+      ansible.builtin.shell: |
+        grep -rl "Components:.*no-subscription" /etc/apt/sources.list.d/*.sources 2>/dev/null | head -1 || true
+      register: ceph_nosub_existing
+      changed_when: false
+
+    - name: Write ceph no-subscription repo (deb822 format)
+      ansible.builtin.shell: |
+        cat > /etc/apt/sources.list.d/ceph.sources << 'SOURCES_EOF'
+        Types: deb
+        URIs: http://download.proxmox.com/debian/{{ ceph_release }}
+        Suites: {{ pve_debian_suite }}
+        Components: no-subscription
+        Signed-By: {{ pve_proxmox_keyring }}
+        SOURCES_EOF
+        sed -i 's/^        //' /etc/apt/sources.list.d/ceph.sources
+      when: ceph_nosub_existing.stdout == ""
+
+    # ================================================================
+    # 7. Disable subscription nag
+    # ================================================================
+    - name: Create /usr/local/bin directory
+      ansible.builtin.shell: mkdir -p /usr/local/bin
+      changed_when: false
+
+    - name: Deploy pve-remove-nag.sh script
+      ansible.builtin.shell: |
+        cat > /usr/local/bin/pve-remove-nag.sh << 'NAGSCRIPT'
+        #!/bin/sh
+        WEB_JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+        if [ -s "$WEB_JS" ] && ! grep -q NoMoreNagging "$WEB_JS"; then
+            echo "Patching Web UI nag..."
+            sed -i -e "/data\.status/ s/!//" -e "/data\.status/ s/active/NoMoreNagging/" "$WEB_JS"
+        fi
+
+        MOBILE_TPL=/usr/share/pve-yew-mobile-gui/index.html.tpl
+        MARKER="<!-- MANAGED BLOCK FOR MOBILE NAG -->"
+        if [ -f "$MOBILE_TPL" ] && ! grep -q "$MARKER" "$MOBILE_TPL"; then
+            echo "Patching Mobile UI nag..."
+            printf "%s\n" \
+              "$MARKER" \
+              "<script>" \
+              "  function removeSubscriptionElements() {" \
+              "    const dialogs = document.querySelectorAll('dialog.pwt-outer-dialog');" \
+              "    dialogs.forEach(dialog => {" \
+              "      const text = (dialog.textContent || '').toLowerCase();" \
+              "      if (text.includes('subscription')) {" \
+              "        dialog.remove();" \
+              "      }" \
+              "    });" \
+              "    const cards = document.querySelectorAll('.pwt-card.pwt-p-2.pwt-d-flex.pwt-interactive.pwt-justify-content-center');" \
+              "    cards.forEach(card => {" \
+              "      const text = (card.textContent || '').toLowerCase();" \
+              "      const hasButton = card.querySelector('button');" \
+              "      if (!hasButton && text.includes('subscription')) {" \
+              "        card.remove();" \
+              "      }" \
+              "    });" \
+              "  }" \
+              "  const observer = new MutationObserver(removeSubscriptionElements);" \
+              "  observer.observe(document.body, { childList: true, subtree: true });" \
+              "  removeSubscriptionElements();" \
+              "  setInterval(removeSubscriptionElements, 300);" \
+              "  setTimeout(() => {observer.disconnect();}, 10000);" \
+              "</script>" \
+              "" >> "$MOBILE_TPL"
+        fi
+        NAGSCRIPT
+        sed -i 's/^        //' /usr/local/bin/pve-remove-nag.sh
+        chmod 755 /usr/local/bin/pve-remove-nag.sh
+
+    - name: Deploy apt post-invoke hook for nag removal
+      ansible.builtin.shell: |
+        cat > /etc/apt/apt.conf.d/no-nag-script << 'EOF'
+        DPkg::Post-Invoke { "/usr/local/bin/pve-remove-nag.sh"; };
+        EOF
+        sed -i 's/^        //' /etc/apt/apt.conf.d/no-nag-script
+        chmod 644 /etc/apt/apt.conf.d/no-nag-script
+
+    - name: Run nag removal script now
+      ansible.builtin.shell: /usr/local/bin/pve-remove-nag.sh
+      changed_when: false
+      ignore_errors: true
+
+    - name: Reinstall proxmox-widget-toolkit to apply nag patch
+      ansible.builtin.shell: apt --reinstall install -y proxmox-widget-toolkit
+      register: widget_reinstall
+      failed_when: false
+      changed_when: widget_reinstall.rc == 0
+
+    # ================================================================
+    # 8. Disable High Availability services
+    # ================================================================
+    - name: Disable pve-ha-lrm
+      ansible.builtin.shell: systemctl disable --now pve-ha-lrm 2>/dev/null || true
+      changed_when: false
+
+    - name: Disable pve-ha-crm
+      ansible.builtin.shell: systemctl disable --now pve-ha-crm 2>/dev/null || true
+      changed_when: false
+
+    - name: Disable corosync
+      ansible.builtin.shell: systemctl disable --now corosync 2>/dev/null || true
+      changed_when: false
+
+    # ================================================================
+    # 9. Update Proxmox VE
+    # ================================================================
+    - name: Run apt update
+      ansible.builtin.shell: apt update
+      register: apt_update_result
+      failed_when: false
+      changed_when: apt_update_result.rc == 0
+
+    - name: Run apt dist-upgrade
+      ansible.builtin.shell: DEBIAN_FRONTEND=noninteractive apt -y dist-upgrade
+      register: apt_upgrade_result
+      failed_when: false
+      changed_when: apt_upgrade_result.rc == 0
+
+    - name: Warn if apt update failed
+      ansible.builtin.debug:
+        msg: "WARNING: apt update failed (rc={{ apt_update_result.rc }})"
+      when: apt_update_result.rc != 0
+
+    - name: Warn if apt dist-upgrade failed
+      ansible.builtin.debug:
+        msg: "WARNING: apt dist-upgrade failed (rc={{ apt_upgrade_result.rc }})"
+      when: apt_upgrade_result.rc != 0
+
+    # ================================================================
+    # 10. Reboot
+    # ================================================================
+    - name: Reboot Proxmox VE node
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+        msg: "Rebooting after PVE post-install configuration"
+
