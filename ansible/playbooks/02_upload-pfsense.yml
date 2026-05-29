@@ -1,0 +1,20 @@
+---
+- name: Upload pfSense ISO to Proxmox
+  hosts: proxmox
+  become: true
+  vars:
+    pfsense_iso_local: "{{ playbook_dir }}/../resources/netgate-installer-v1.2-RELEASE-amd64.iso"
+    pfsense_iso_dest: "/var/lib/vz/template/iso/netgate-installer-v1.2-RELEASE-amd64.iso"
+
+  tasks:
+    - name: Check if ISO already exists on Proxmox
+      stat:
+        path: "{{ pfsense_iso_dest }}"
+      register: iso_file
+
+    - name: Upload pfSense ISO to Proxmox
+      when: not iso_file.stat.exists
+      copy:
+        src: "{{ pfsense_iso_local }}"
+        dest: "{{ pfsense_iso_dest }}"
+        mode: "0644"

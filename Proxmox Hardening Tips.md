@@ -139,7 +139,7 @@ put them on a dedicated Vlan
   support. For air-gapped setups, use DNS challenge (e.g. Cloudflare). Alternatively, put a reverse proxy (Nginx,
   Traefik) in front.
 
-  4. Two-Factor Authentication (2FA)
+  4. Two-Factor Authentication (2FA) (needs to be manual due to having to take picture on phone)
   Enable TOTP (Google Authenticator, Authy) or WebAuthn (YubiKey) for all admin accounts, especially root. Built
   directly into Proxmox under Datacenter > Permissions > Two Factor.
 

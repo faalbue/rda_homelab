@@ -1,2 +1,4 @@
 .vault_password
 *.retry
+
+./resources/*
