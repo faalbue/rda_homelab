@@ -1,0 +1,28 @@
+---
+- name: Upload Windows 10 ISO and download VirtIO drivers to Proxmox
+  hosts: proxmox
+  become: true
+  vars:
+    win10_iso_local: "{{ playbook_dir }}/../../resources/Windows 10.iso"
+    win10_iso_dest: "/var/lib/vz/template/iso/Windows 10.iso"
+    virtio_iso_url: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+    virtio_iso_dest: "/var/lib/vz/template/iso/virtio-win.iso"
+
+  tasks:
+    - name: Download VirtIO drivers ISO
+      get_url:
+        url: "{{ virtio_iso_url }}"
+        dest: "{{ virtio_iso_dest }}"
+        mode: "0644"
+
+    - name: Check if Windows 10 ISO already exists on Proxmox
+      stat:
+        path: "{{ win10_iso_dest }}"
+      register: win10_iso
+
+    - name: Upload Windows 10 ISO to Proxmox
+      when: not win10_iso.stat.exists
+      copy:
+        src: "{{ win10_iso_local }}"
+        dest: "{{ win10_iso_dest }}"
+        mode: "0644"

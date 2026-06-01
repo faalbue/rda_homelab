@@ -3,7 +3,7 @@
   hosts: proxmox
   become: true
   vars:
-    pfsense_iso_local: "{{ playbook_dir }}/../resources/netgate-installer-v1.2-RELEASE-amd64.iso"
+    pfsense_iso_local: "{{ playbook_dir }}/../../resources/netgate-installer-v1.2-RELEASE-amd64.iso"
     pfsense_iso_dest: "/var/lib/vz/template/iso/netgate-installer-v1.2-RELEASE-amd64.iso"
 
   tasks:
