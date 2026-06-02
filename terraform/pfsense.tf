@@ -1,44 +1,55 @@
-resource "proxmox_vm_qemu" "pfsense" {
-  name        = "pfsense"
-  target_node = var.target_node
-  vmid        = 100
-  iso         = "local:iso/netgate-installer-v1.2-RELEASE-amd64.iso"
+resource "proxmox_virtual_environment_vm" "pfsense" {
+  name      = "pfsense"
+  node_name = var.target_node
+  vm_id     = 100
+  on_boot   = true
 
-  cores   = 2
-  memory  = 4096
-  sockets = 1
-  cpu     = "host"
-  agent   = 0  # no qemu-guest-agent in pfSense by default
-  onboot  = true
+  bios = "ovmf"
 
-  scsihw  = "virtio-scsi-pci"
-  os_type = "other"
-  bios    = "ovmf"  # UEFI — use "seabios" if you prefer legacy
+  cpu {
+    cores   = 2
+    sockets = 1
+    type    = "host"
+  }
 
-  # WAN interface
-  network {
-    model  = "virtio"
+  memory {
+    dedicated = 4096
+  }
+
+  agent {
+    enabled = false
+  }
+
+  cdrom {
+    file_id   = "local:iso/netgate-installer-v1.2-RELEASE-amd64.iso"
+    interface = "ide2"
+  }
+
+  disk {
+    datastore_id = "local-lvm"
+    interface    = "scsi0"
+    size         = 32
+    file_format  = "raw"
+  }
+
+  network_device {
     bridge = "vmbr0"
-  }
-
-  # LAN interface
-  network {
     model  = "virtio"
-    bridge = "vmbr1"
   }
 
-  disks {
-    scsi {
-      scsi0 {
-        disk {
-          size    = "32G"
-          storage = "local-lvm"
-        }
-      }
-    }
+  network_device {
+    bridge = "vmbr1"
+    model  = "virtio"
+  }
+
+  scsi_hardware = "virtio-scsi-pci"
+
+  operating_system {
+    type = "other"
   }
 
   lifecycle {
-    ignore_changes = [network, disks]
+    ignore_changes = [network_device, disk]
   }
 }
+

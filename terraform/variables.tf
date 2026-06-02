@@ -1,18 +1,20 @@
 variable "proxmox_api_url" {
-    description = "Proxmox API URL, e.g. https://10.0.0.175:8006/api2/json"
-    type        = string
+  description = "Proxmox API endpoint, e.g. https://192.168.1.10:8006"  
+  type        = string
   }
 
   variable "proxmox_user" {
-    description = "Proxmox API user, e.g. root@pam"
-    type        = string
-    default     = "administrator@pam"
+    variable "proxmox_api_token_id" { 
+      description = "Proxmox API token ID, e.g. terraform@pve!mytoken"
+      type        = string
+      default     = "administrator@pam"
   }
 
   variable "proxmox_password" {
-    description = "Proxmox API password"
-    type        = string
-    sensitive   = true
+    variable "proxmox_api_token_secret" {
+      description = "Proxmox API token secret UUID"
+      type        = string
+      sensitive   = true
   }
 
   variable "target_node" {
