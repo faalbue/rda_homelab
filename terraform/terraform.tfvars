@@ -1,1 +1,5 @@
-
+proxmox_endpoint  = "https://10.0.0.175:8006"
+proxmox_api_token_id = "terraform@pve!tf-token"
+proxmox_api_token_secret = "2431ceac-b707-43b2-aaf9-ca4a4db6f47e"
+proxmox_api_token = "terraform@pve!tf-token=2431ceac-b707-43b2-aaf9-ca4a4db6f47e"
+node_name         = "hagrid"

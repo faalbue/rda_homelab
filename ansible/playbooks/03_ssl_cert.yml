@@ -24,7 +24,7 @@
 
     - name: Write DNS credentials to temp file
       ansible.builtin.copy:
-        content: "{{ acme_dns_credentials }}"
+        content: "{{ vault_acme_dns_credentials }}"
         dest: /tmp/acme_dns_creds
         mode: "0600"
       no_log: true
