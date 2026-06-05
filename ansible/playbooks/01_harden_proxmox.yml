@@ -67,13 +67,18 @@
     - name: Restart SSH
       ansible.builtin.service:
         name: ssh
-        state: restarted
+        state: restarted 
 
-    # 2. Configure Proxmox Firewall — datacenter and node levels
-    - name: Write datacenter firewall config (firewall disabled until rules are in place)    
-      ansible.builtin.shell:
-        cmd: |
-          cat > /etc/pve/firewall/cluster.fw << 'FWEOF'
+        # 2. Configure Proxmox Firewall — datacenter and node levels
+  
+    - name: Ensure firewall directory exists
+      ansible.builtin.command:
+        cmd: mkdir -p /etc/pve/firewall
+        creates: /etc/pve/firewall
+
+    - name: Firewall rules (disabled until rules are enabled)
+      ansible.builtin.shell: |
+        cat > /etc/pve/firewall/cluster.fw << 'EOF'
           [OPTIONS]
           enable: 0
           policy_in: DROP
@@ -85,8 +90,29 @@
           IN ACCEPT -p tcp -dport 111 -log nolog
           IN ACCEPT -p udp -dport 111 -log nolog
           IN ACCEPT -p tcp -dport 2049 -log nolog
-          FWEOF
-      changed_when: true
+          EOF
+      args:
+        executable: /bin/bash
+
+          #dest: /etc/pve/firewall/cluster.fw
+          
+          
+          #- name: Write datacenter firewall config
+          #ansible.builtin.copy:
+          #dest: /etc/pve/firewall/cluster.fw
+          #content: |
+          #[OPTIONS]
+          #enable: 0
+          #policy_in: DROP
+          #policy_out: ACCEPT
+
+          #[RULES]
+          #IN SSH(ACCEPT) -source {{ management_cidr }} -log nolog
+          #IN ACCEPT -p tcp -dport 8006 -source {{ management_cidr }} -log nolog
+          #IN ACCEPT -p tcp -dport 111 -log nolog
+          #IN ACCEPT -p udp -dport 111 -log nolog
+          #IN ACCEPT -p tcp -dport 2049 -log nolog
+          #mode: "0640"
 
     - name: Ensure node firewall directory exists
       ansible.builtin.shell: mkdir /etc/pve/nodes/{{ ansible_hostname }}
