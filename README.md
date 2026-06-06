@@ -37,7 +37,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/ansible_proxmox -C "ansible@proxmox" (First time
 
 ssh-keygen -f "/root/.ssh/known_hosts" -R "10.0.0.175" (on re-install only) (clears key from known host file)
 
-ssh-copy-id -i ~/.ssh/ansible_proxmox.pub root@10.0.0.175
+ssh-copy-id -i ~/.ssh/ansible_proxmox.pub [root@10.0.0.175](mailto:root@10.0.0.175)
 
 ## Bootstrap Playbook
 
@@ -47,7 +47,12 @@ I ran the Bootstrap Playbook from the ansible.md directory.
 ansible-playbook playbooks/00_bootstrap.yml
 
 ```markdown
-ansible-vault create inventory/group_vars/proxmox/vault.yml (First time use only)
+
+First Time (from the ansible directory):
+   echo 'your-vault-password-here' > .vault_password
+   chmod 600 .vault_password
+   ansible-vault create inventory/group_vars/proxmox/vault.yml 
+
 ansible-vault edit inventory/group_vars/proxmox/vault.yml (Second time and on)
 
 ## Force Creation
@@ -110,15 +115,17 @@ ssh pve-hagrid
 Test:
 ansible-playbook playbooks/site.yml
 ```
+
 ## IONOS API key
-(? .back) ls -la
-ansible-vault edit inventory/group_vars/proxmox/vault.yml
-add the following at the bottom:
-vault_acme_dns_credentials: "IONOS_PREFIX=<key>\nIONOS_SECRET=<key>="
+
+(? .back) ls -la  
+ansible-vault edit inventory/group_vars/proxmox/vault.yml  
+add the following at the bottom:  
+vault_acme_dns_credentials: "IONOS_PREFIX=\nIONOS_SECRET=="
 
 ## 02_update_proxmox
-To run the update_proxmox.yml
+
+To run the update_proxmox.yml  
 do ansible-playbook playbooks/02_update_proxmox.yml
 
 the code will produce these results: adds a ssl certificate, uploads the pfsense iso and windows iso to proxmox
-
