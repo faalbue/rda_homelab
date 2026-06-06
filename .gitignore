@@ -2,4 +2,5 @@
 *.retry
 
 resources/
+ansible/ansible.cfg
 ansible/inventory/group_vars/proxmox/vault.yml

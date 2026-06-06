@@ -23,13 +23,14 @@
     - name: Copy SSH public key for ansible user
       ansible.posix.authorized_key:
         user: root
-        key: "{{ lookup('file', '~/.ssh/ansible_proxmox.pub') }}"
+        key: "{{ lookup('file', ssh_public_key_file) }}"
         state: present
 
     - name: Check if vault.yml already exists
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/../inventory/group_vars/proxmox/vault.yml"
       delegate_to: localhost
+      become: false
       register: vault_file
 
     - name: Create ansible PAM user

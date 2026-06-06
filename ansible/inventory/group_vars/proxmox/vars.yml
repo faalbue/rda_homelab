@@ -1,5 +1,6 @@
 proxmox_api_token_id: "{{ vault_proxmox_api_token_id }}"
 proxmox_api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+ssh_public_key_file: "~/.ssh/ansible_proxmox.pub"
 acme_email: "raalbue@gmail.com"
 acme_dns_plugin_name: "ionos"
 acme_dns_api: "ionos"

@@ -5,7 +5,7 @@
   become: true  
   vars:
     admin_user: administrator
-    ssh_public_key: "{{ lookup('file', '~/.ssh/ansible_proxmox.pub') }}"
+    ssh_public_key: "{{ lookup('file', ssh_public_key_file) }}"
     management_cidr: "10.0.0.0/24"
 
   tasks:

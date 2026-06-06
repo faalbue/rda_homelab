@@ -43,6 +43,9 @@ ssh-copy-id -i ~/.ssh/ansible_proxmox.pub [root@10.0.0.175](mailto:root@10.0.0.1
 
 ## 00_Bootstrap
 
+ssh key file override:  
+    -e ssh_public_key_file=~/.ssh/rda_ansible_proxmox.pub
+
 I ran the Bootstrap Playbook from the ansible.md directory.  
 ansible-playbook playbooks/00_bootstrap.yml
 
